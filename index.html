@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pl" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>goglite — instalatory offline GOG</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="app-shell">
+    <!-- ============ SIDEBAR (nawigacja w stylu GOG Galaxy) ============ -->
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">▚</span>
+        <span class="brand-name">goglite</span>
+      </div>
+
+      <nav class="side-nav">
+        <button id="nav-games" class="nav-item active">
+          <span class="nav-ico" aria-hidden="true">▦</span>
+          <span class="nav-label" data-i18n="nav.library">Biblioteka</span>
+        </button>
+        <button id="nav-downloads" class="nav-item">
+          <span class="nav-ico" aria-hidden="true">↓</span>
+          <span class="nav-label" data-i18n="nav.downloads">Pobierania</span>
+          <span id="dl-badge" class="badge hidden">0</span>
+        </button>
+        <button id="nav-settings" class="nav-item">
+          <span class="nav-ico" aria-hidden="true">⚙</span>
+          <span class="nav-label" data-i18n="nav.settings">Ustawienia</span>
+        </button>
+      </nav>
+
+      <div class="side-footer">
+        <button id="btn-sync" class="btn btn-primary side-sync hidden" data-i18n="action.sync">Synchronizuj</button>
+        <div class="account-row">
+          <span id="status-badge" class="badge hidden"></span>
+          <button id="btn-logout" class="btn btn-small hidden" data-i18n="action.logout">Wyloguj</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ KOLUMNA GŁÓWNA ============ -->
+    <div id="main-col">
+      <header id="topbar">
+        <div class="search-box">
+          <span class="search-ico" aria-hidden="true">🔍</span>
+          <input id="search-input" type="search" autocomplete="off"
+                 data-i18n-placeholder="topbar.search" placeholder="Szukaj w bibliotece…" />
+        </div>
+        <div class="topbar-actions">
+          <button id="btn-settings" class="icon-btn" data-i18n-title="nav.settings"
+                  title="Ustawienia" aria-label="Ustawienia">⚙</button>
+        </div>
+      </header>
+
+      <main id="content">
+        <section id="view-games" class="view active">
+          <div id="welcome">
+            <h2 data-i18n="welcome.title">Witaj w goglite</h2>
+            <p data-i18n="welcome.desc1">Lekki menedżer pobierania instalatorów offline z GOG.com.</p>
+            <p data-i18n="welcome.desc2">Zaloguj się przez okno GOG, a następnie zsynchronizuj bibliotekę.</p>
+            <button id="btn-login" class="btn btn-primary btn-large" data-i18n="welcome.login">Zaloguj przez GOG</button>
+            <p id="login-error" class="error hidden"></p>
+          </div>
+
+          <div id="sync-progress" class="sync-bar hidden">
+            <span class="sync-bar-label" data-i18n="sync.syncing">Synchronizowanie biblioteki…</span>
+            <progress id="sync-progress-bar" max="100" value="0"></progress>
+          </div>
+
+          <section id="game-section" class="hidden">
+            <div class="section-header">
+              <h2 data-i18n="library.title">Moja biblioteka</h2>
+              <span id="game-count" class="badge"></span>
+            </div>
+            <div class="platform-filter" id="platform-filter">
+              <button class="chip active" data-platform="all" data-i18n="filter.all">Wszystkie</button>
+              <button class="chip" data-platform="windows" data-i18n="filter.windows">Windows</button>
+              <button class="chip" data-platform="linux" data-i18n="filter.linux">Linux</button>
+              <button class="chip" data-platform="macos" data-i18n="filter.macos">macOS</button>
+            </div>
+            <div id="game-grid" class="game-grid"></div>
+          </section>
+          <div id="game-empty" class="empty-state hidden"></div>
+        </section>
+
+        <section id="view-downloads" class="view">
+          <div class="section-header">
+            <h2 data-i18n="downloads.title">Pobierania</h2>
+            <div class="dl-toolbar">
+              <span id="dl-dir-label" class="path-chip" title=""></span>
+              <button id="btn-dl-settings" class="btn btn-small" data-i18n="downloads.changeInSettings">Zmień w ustawieniach</button>
+            </div>
+          </div>
+          <div id="download-list" class="download-list"></div>
+        </section>
+
+        <section id="view-settings" class="view">
+          <div class="section-header"><h2 data-i18n="settings.title">Ustawienia</h2></div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div class="settings-label">
+                <h3 data-i18n="settings.language">Język</h3>
+                <p data-i18n="settings.language.desc">Wybierz język interfejsu aplikacji.</p>
+              </div>
+              <div class="segmented" id="lang-switch">
+                <button class="seg-btn" data-lang="pl">Polski</button>
+                <button class="seg-btn" data-lang="en">English</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">
+                <h3 data-i18n="settings.theme">Motyw</h3>
+                <p data-i18n="settings.theme.desc">Wybierz jasny lub ciemny wygląd aplikacji.</p>
+              </div>
+              <div class="segmented" id="theme-switch">
+                <button class="seg-btn" data-theme-opt="light">
+                  <span class="seg-ico" aria-hidden="true">☀</span><span data-i18n="settings.theme.light">Jasny</span>
+                </button>
+                <button class="seg-btn" data-theme-opt="dark">
+                  <span class="seg-ico" aria-hidden="true">☾</span><span data-i18n="settings.theme.dark">Ciemny</span>
+                </button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">
+                <h3 data-i18n="settings.dir">Folder zapisu pobrań</h3>
+                <p data-i18n="settings.dir.desc">Miejsce, do którego zapisywane są instalatory.</p>
+              </div>
+              <div class="settings-control">
+                <span id="set-dir-label" class="path-chip" title="">—</span>
+                <button id="btn-choose-dir" class="btn btn-small" data-i18n="settings.dir.change">Zmień folder…</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div class="settings-label">
+                <h3 data-i18n="settings.about">O aplikacji</h3>
+                <p data-i18n="settings.about.desc">Lekki menedżer instalatorów offline GOG.</p>
+              </div>
+              <span class="badge">v0.1.0</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: szczegóły gry (hero) ============ -->
+  <dialog id="game-modal">
+    <article class="modal-content">
+      <div class="modal-hero" id="modal-hero">
+        <img class="modal-hero-img" id="modal-hero-img" alt="" />
+        <div class="modal-hero-grad"></div>
+        <button id="btn-close-modal" class="btn close-btn modal-close">&times;</button>
+        <div class="modal-hero-text"><h2 id="modal-title">---</h2></div>
+      </div>
+      <div class="modal-tabs" id="modal-tabs" role="tablist">
+        <button class="modal-tab active" data-tab="info" role="tab" data-i18n="modal.tabDescription">Opis</button>
+        <button class="modal-tab" data-tab="installers" role="tab" data-i18n="modal.tabInstallers">Instalatory</button>
+      </div>
+      <div class="modal-body" id="modal-body"><p class="loading" data-i18n="modal.loading">Ładowanie…</p></div>
+      <div class="screenshot-viewer hidden" id="screenshot-viewer">
+        <button class="btn close-btn screenshot-viewer-close" id="screenshot-viewer-close">&times;</button>
+        <img id="screenshot-viewer-img" alt="" />
+      </div>
+    </article>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

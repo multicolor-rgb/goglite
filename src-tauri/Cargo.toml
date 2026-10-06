@@ -1,0 +1,29 @@
+[package]
+name = "goglite"
+version = "0.1.0"
+description = "Lekki menedżer pobierania instalatorów offline GOG"
+authors = ["GOG Lite"]
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+rusqlite = { version = "0.31", features = ["bundled"] }
+url = "2"
+dirs = "5"
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

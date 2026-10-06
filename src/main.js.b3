@@ -1,0 +1,184 @@
+// goglite — frontend (token recznie wklejany)
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+const $ = (s) => document.querySelector(s);
+const show = (e) => e.classList.remove("hidden");
+const hide = (e) => e.classList.add("hidden");
+
+const d = {
+  tokenInput: $("#token-input"), setTokenBtn: $("#btn-set-token"),
+  loginError: $("#login-error"), welcome: $("#welcome"),
+  logoutBtn: $("#btn-logout"), syncBtn: $("#btn-sync"),
+  statusBadge: $("#status-badge"),
+  gameSection: $("#game-section"), gameGrid: $("#game-grid"),
+  gameEmpty: $("#game-empty"), gameCount: $("#game-count"),
+  syncBar: $("#sync-progress"), syncProg: $("#sync-progress-bar"),
+  dlList: $("#download-list"), dlBadge: $("#dl-badge"),
+  tabGames: $("#tab-games"), tabDls: $("#tab-downloads"),
+  viewGames: $("#view-games"), viewDls: $("#view-downloads"),
+  modal: $("#game-modal"), modalTitle: $("#modal-title"),
+  modalBody: $("#modal-body"), closeModalBtn: $("#btn-close-modal"),
+};
+
+let loggedIn = false;
+
+function switchView(v) {
+  [d.viewGames, d.viewDls].forEach(x => x.classList.remove("active"));
+  [d.tabGames, d.tabDls].forEach(x => x.classList.remove("active"));
+  (v === "games" ? d.viewGames : d.viewDls).classList.add("active");
+  (v === "games" ? d.tabGames : d.tabDls).classList.add("active");
+}
+d.tabGames.addEventListener("click", () => switchView("games"));
+d.tabDls.addEventListener("click", () => switchView("downloads"));
+
+async function init() {
+  try { const st = await invoke("get_auth_status"); loggedIn = st.loggedIn; } catch (e) {}
+  renderAuth(); await loadDownloads();
+  if (loggedIn) { await loadGames(); show(d.syncBtn); }
+
+  listen("auth:changed", (e) => {
+    loggedIn = e.payload.loggedIn; renderAuth();
+    if (loggedIn) { hide(d.welcome); show(d.syncBtn); sync(); }
+    else { show(d.welcome); hide(d.gameSection); hide(d.syncBtn); }
+  });
+  listen("library:synced", () => loadGames());
+  listen("library:page", (e) => { show(d.syncBar); d.syncProg.value = e.payload.progress || 0; });
+  listen("download:progress", (e) => { const el = document.querySelector(`[data-dl-id="${e.payload.id}"]`); if (el) updateDl(el, e.payload); });
+  listen("download:state", (e) => { loadDownloads(); });
+
+  d.setTokenBtn.addEventListener("click", doSetToken);
+  d.logoutBtn.addEventListener("click", doLogout);
+  d.syncBtn.addEventListener("click", sync);
+  d.closeModalBtn.addEventListener("click", closeModal);
+  d.modal.addEventListener("click", (e) => { if (e.target === d.modal) closeModal(); });
+}
+
+function renderAuth() {
+  if (loggedIn) {
+    d.welcome.querySelector("form")?.classList.add("hidden");
+    d.welcome.querySelector("h2").textContent = "Zalogowano";
+    show(d.logoutBtn); hide(d.welcome);
+    d.statusBadge.textContent = "Online"; show(d.statusBadge);
+  } else {
+    if (d.welcome) {
+      d.welcome.querySelector("form")?.classList.remove("hidden");
+      d.welcome.querySelector("h2").textContent = "Witaj w goglite";
+    }
+    hide(d.logoutBtn); show(d.welcome);
+    hide(d.gameSection); hide(d.syncBtn);
+    d.statusBadge.textContent = "Offline"; show(d.statusBadge);
+  }
+}
+
+async function doSetToken() {
+  const token = d.email.value.trim();
+  if (!token) { d.loginError.textContent = "Wklej token."; show(d.loginError); return; }
+  hide(d.loginError);
+  d.setTokenBtn.disabled = true; d.setTokenBtn.textContent = "Sprawdzanie...";
+  try {
+    await invoke("login_via_www", { email, password });
+    loggedIn = true;
+    renderAuth();
+    show(d.syncBtn);
+    await loadGames();
+    hide(d.welcome);
+    sync();
+  } catch (e) {
+    d.loginError.textContent = "Blad: " + String(e); show(d.loginError);
+  } finally {
+    d.setTokenBtn.disabled = false; d.setTokenBtn.textContent = "Zaloguj przez token";
+  }
+}
+
+async function doLogout() {
+  try { await invoke("logout"); loggedIn = false; renderAuth(); d.gameGrid.innerHTML = ""; hide(d.gameSection); }
+  catch (e) { console.error(e); }
+}
+
+async function sync() {
+  if (!loggedIn) return;
+  show(d.syncBar);
+  try { await invoke("sync_library"); await loadGames(); }
+  catch (e) { console.error("sync:", e); if (e.includes("auth")) { loggedIn = false; renderAuth(); } }
+  finally { hide(d.syncBar); }
+}
+
+async function loadGames() {
+  let games;
+  try { games = await invoke("get_games"); } catch (e) { games = []; }
+  d.gameGrid.innerHTML = "";
+  if (games.length === 0) { show(d.gameEmpty); hide(d.gameSection); return; }
+  hide(d.gameEmpty); show(d.gameSection);
+  d.gameCount.textContent = games.length;
+  for (const g of games) {
+    const card = document.createElement("div"); card.className = "game-card"; card.dataset.gameId = g.id;
+    const src = g.imageUrl || g.iconUrl;
+    const img = src ? `<img class="game-card-cover" src="${esc(src)}" alt="${esc(g.title)}" loading="lazy">` : `<div class="game-card-fallback">\ud83c\udfae</div>`;
+    card.innerHTML = `${img}<div class="game-card-title">${esc(g.title)}</div>`;
+    card.addEventListener("click", () => openGame(g.id, g.title));
+    d.gameGrid.appendChild(card);
+  }
+}
+
+async function openGame(id, title) {
+  d.modalTitle.textContent = title;
+  d.modalBody.innerHTML = "<p>Ladowanie...</p>"; d.modal.showModal();
+  try {
+    const list = await invoke("get_installers", { gameId: id });
+    renderInstallers(list, id);
+  } catch (e) { d.modalBody.innerHTML = `<p class="error">Blad: ${esc(e)}</p>`; }
+}
+
+function renderInstallers(list, gameId) {
+  if (!list || !list.length) { d.modalBody.innerHTML = "<p>Brak instalatorow.</p>"; return; }
+  d.modalBody.innerHTML = list.map(i => `
+    <div class="installer-item"><h4>${esc(i.name)}</h4>
+      <div class="installer-meta"><span>${i.os}</span><span>${fmtSize(i.size)}</span><span>v${esc(i.version)}</span><span>${i.language||"en"}</span></div>
+      <button class="btn btn-small btn-primary dl-t" data-game="${gameId}" data-inst="${i.downloadId}">Pobierz</button></div>`
+  ).join("");
+  d.modalBody.querySelectorAll(".dl-t").forEach(b => b.addEventListener("click", () => startDownload(parseInt(b.dataset.game), b.dataset.inst)));
+}
+
+function closeModal() { d.modal.close(); }
+
+async function startDownload(gid, iid) {
+  try {
+    await invoke("start_download", { gameId: gid, installerId: iid });
+    await loadDownloads(); d.dlBadge.textContent = "..."; show(d.dlBadge); switchView("downloads");
+  } catch (e) { console.error(e); if (e.includes("auth")) { loggedIn = false; renderAuth(); } }
+}
+async function pauseDl(id) { try { await invoke("pause_download", { downloadId: id }); } catch (e) {} }
+async function cancelDl(id) { try { await invoke("cancel_download", { downloadId: id }); await loadDownloads(); } catch (e) {} }
+
+async function loadDownloads() {
+  let r;
+  try { r = await invoke("get_downloads"); } catch (e) { r = []; }
+  d.dlList.innerHTML = "";
+  if (!r.length) { d.dlList.innerHTML = "<p>Brak pobieran.</p>"; hide(d.dlBadge); return; }
+  const a = r.filter(x => x.status === "downloading").length;
+  d.dlBadge.textContent = a > 0 ? String(a) : "\u2705"; show(d.dlBadge);
+  for (const x of r) { const el = document.createElement("div"); el.className = "download-item"; el.dataset.dlId = x.id; updateDl(el, x); d.dlList.appendChild(el); }
+}
+
+function updateDl(el, d) {
+  const pct = d.progress != null ? d.progress : (d.totalBytes > 0 ? (d.downloadedBytes / d.totalBytes * 100) : 0);
+  const fc = d.status === "completed" ? "completed" : d.status === "failed" ? "failed" : d.status === "paused" ? "paused" : "";
+  el.innerHTML = `
+    <div class="dl-game-title">${esc(d.gameTitle)}</div>
+    <div class="dl-filename">${esc(d.filename)}</div>
+    <div class="dl-progress-track"><div class="dl-progress-fill ${fc}" style="width:${Math.min(pct,100)}%"></div></div>
+    <div class="dl-info"><span>${d.status}</span><span>${fmtSize(d.downloadedBytes)} / ${fmtSize(d.totalBytes)}</span><span>${pct.toFixed(1)}%</span></div>
+    <div class="dl-actions">
+      ${d.status === "downloading" ? `<button class="btn btn-small" onclick="pauseDl(${d.id})">Pauza</button><button class="btn btn-small" onclick="cancelDl(${d.id})">Anuluj</button>` : ""}
+      ${d.status === "paused" ? `<button class="btn btn-small btn-primary" onclick="startDownload(${d.gameId},'${d.installerId}')">Wznow</button><button class="btn btn-small" onclick="cancelDl(${d.id})">Anuluj</button>` : ""}
+      ${d.status === "failed" ? `<button class="btn btn-small btn-primary" onclick="startDownload(${d.gameId},'${d.installerId}')">Sprobuj ponownie</button>` : ""}
+    </div>`;
+}
+
+function esc(s) { return !s ? "" : String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[c]); }
+function fmtSize(b) { b = parseInt(b) || 0; if (b < 1024) return b + " B"; if (b < 1048576) return (b/1024).toFixed(1) + " KiB"; if (b < 1073741824) return (b/1048576).toFixed(1) + " MiB"; return (b/1073741824).toFixed(2) + " GiB"; }
+
+window.pauseDl = pauseDl; window.cancelDl = cancelDl; window.startDownload = startDownload; window.closeModal = closeModal;
+document.addEventListener("DOMContentLoaded", init);

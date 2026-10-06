@@ -1,0 +1,253 @@
+// goglite — frontend (vanilla JS)
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+const $ = (s) => document.querySelector(s);
+const show = (e) => e.classList.remove("hidden");
+const hide = (e) => e.classList.add("hidden");
+
+const dom = {
+  loginBtn:   $("#btn-login"),    loginBig: $("#btn-login-big"),
+  logoutBtn:  $("#btn-logout"),   syncBtn:  $("#btn-sync"),
+  statusBadge:$("#status-badge"), welcome:  $("#welcome"),
+  gameSection:$("#game-section"),gameGrid: $("#game-grid"),
+  gameEmpty:  $("#game-empty"),  gameCount:$("#game-count"),
+  syncBar:    $("#sync-progress"),syncProg: $("#sync-progress-bar"),
+  dlList:     $("#download-list"),dlBadge: $("#dl-badge"),
+  tabGames:   $("#tab-games"),   tabDls:   $("#tab-downloads"),
+  viewGames:  $("#view-games"),  viewDls:  $("#view-downloads"),
+  modal:      $("#game-modal"),  modalTitle:$("#modal-title"),
+  modalBody:  $("#modal-body"),  closeModalBtn:$("#btn-close-modal"),
+};
+
+let loggedIn = false;
+
+// ========== TAB ZAKŁADEK ==========
+
+function switchView(view) {
+  [dom.viewGames, dom.viewDls].forEach(v => v.classList.remove("active"));
+  [dom.tabGames, dom.tabDls].forEach(t => t.classList.remove("active"));
+  if (view === "games") { dom.viewGames.classList.add("active"); dom.tabGames.classList.add("active"); }
+  else { dom.viewDls.classList.add("active"); dom.tabDls.classList.add("active"); }
+}
+
+dom.tabGames.addEventListener("click", () => switchView("games"));
+dom.tabDls.addEventListener("click", () => switchView("downloads"));
+
+// ========== INICJALIZACJA ==========
+
+async function init() {
+  try {
+    const st = await invoke("get_auth_status");
+    loggedIn = st.loggedIn;
+  } catch (e) { console.error(e); }
+  renderAuth();
+  await loadDownloads();
+  if (loggedIn) { await loadGames(); show(dom.syncBtn); }
+
+  listen("auth:changed", (e) => {
+    loggedIn = e.payload.loggedIn;
+    renderAuth();
+    if (loggedIn) { hide(dom.welcome); show(dom.syncBtn); sync(); }
+    else { show(dom.welcome); hide(dom.gameSection); hide(dom.syncBtn); }
+  });
+  listen("library:synced", () => loadGames());
+  listen("library:page", (e) => {
+    show(dom.syncBar); dom.syncProg.value = e.payload.progress || 0;
+  });
+  listen("download:progress", (e) => {
+    const el = document.querySelector(`[data-dl-id="${e.payload.id}"]`);
+    if (el) updateDlItem(el, e.payload);
+  });
+  listen("download:state", (e) => {
+    const el = document.querySelector(`[data-dl-id="${e.payload.id}"]`);
+    if (el) el.querySelector(".dl-status").textContent = e.payload.status;
+    loadDownloads();
+  });
+
+  dom.loginBtn.addEventListener("click", login);
+  dom.loginBig.addEventListener("click", login);
+  dom.logoutBtn.addEventListener("click", logout);
+  dom.syncBtn.addEventListener("click", sync);
+  dom.closeModalBtn.addEventListener("click", closeModal);
+  dom.modal.addEventListener("click", (e) => { if (e.target === dom.modal) closeModal(); });
+}
+
+function renderAuth() {
+  if (loggedIn) {
+    hide(dom.loginBtn); hide(dom.loginBig); show(dom.logoutBtn);
+    hide(dom.welcome); dom.statusBadge.textContent = "Online"; show(dom.statusBadge);
+  } else {
+    show(dom.loginBtn); show(dom.loginBig); hide(dom.logoutBtn);
+    show(dom.welcome); hide(dom.gameSection); hide(dom.syncBtn);
+    dom.statusBadge.textContent = "Offline"; show(dom.statusBadge);
+  }
+}
+
+async function login() {
+  try { await invoke("login"); } catch (e) { console.error("login:", e); }
+}
+
+async function logout() {
+  try {
+    await invoke("logout");
+    loggedIn = false; renderAuth(); dom.gameGrid.innerHTML = ""; hide(dom.gameSection);
+  } catch (e) { console.error(e); }
+}
+
+// ========== SYNCHRONIZACJA ==========
+
+async function sync() {
+  if (!loggedIn) return;
+  show(dom.syncBar);
+  try {
+    await invoke("sync_library");
+    await loadGames();
+  } catch (e) {
+    console.error("sync:", e);
+    if (e.includes("auth")) { loggedIn = false; renderAuth(); }
+  } finally { hide(dom.syncBar); }
+}
+
+// ========== BIBLIOTEKA ==========
+
+async function loadGames() {
+  let games;
+  try { games = await invoke("get_games"); } catch (e) { games = []; console.error(e); }
+  dom.gameGrid.innerHTML = "";
+  if (games.length === 0) { show(dom.gameEmpty); hide(dom.gameSection); return; }
+  hide(dom.gameEmpty); show(dom.gameSection);
+  dom.gameCount.textContent = games.length;
+  for (const g of games) {
+    const card = document.createElement("div");
+    card.className = "game-card";
+    card.dataset.gameId = g.id;
+    const imgUrl = g.imageUrl || g.iconUrl;
+    const cover = imgUrl
+      ? `<img class="game-card-cover" src="${esc(imgUrl)}" alt="${esc(g.title)}" loading="lazy" onerror="this.outerHTML='<div class=game-card-fallback>\ud83c\udfae</div>'">`
+      : `<div class="game-card-fallback">\ud83c\udfae</div>`;
+    card.innerHTML = `${cover}<div class="game-card-title">${esc(g.title)}</div>`;
+    card.addEventListener("click", () => openGame(g.id, g.title));
+    dom.gameGrid.appendChild(card);
+  }
+}
+
+// ========== MODAL ==========
+
+async function openGame(gameId, title) {
+  dom.modalTitle.textContent = title;
+  dom.modalBody.innerHTML = `<p class="loading">\ud83d\udd04 \u0141adowanie instalator\u00f3w\u2026</p>`;
+  dom.modal.showModal();
+  try {
+    const installers = await invoke("get_installers", { gameId });
+    renderInstallers(installers, gameId);
+  } catch (e) { dom.modalBody.innerHTML = `<p class="error">B\u0142\u0105d: ${esc(e)}</p>`; }
+}
+
+function renderInstallers(installers, gameId) {
+  if (!installers || installers.length === 0) {
+    dom.modalBody.innerHTML = "<p class=\"empty-state\">Brak instalator\u00f3w offline.</p>";
+    return;
+  }
+  dom.modalBody.innerHTML = installers.map(inst => `
+    <div class="installer-item">
+      <h4>${esc(inst.name)}</h4>
+      <div class="installer-meta">
+        <span>OS: ${inst.os}</span>
+        <span>${fmtSize(inst.size)}</span>
+        <span>v${esc(inst.version)}</span>
+        <span>${inst.language||"en"}</span>
+      </div>
+      <button class="btn btn-small btn-primary dl-trigger" data-game="${gameId}" data-installer="${inst.downloadId}">Pobierz</button>
+    </div>
+  `).join("");
+  dom.modalBody.querySelectorAll(".dl-trigger").forEach(btn => {
+    btn.addEventListener("click", () => startDownload(parseInt(btn.dataset.game), btn.dataset.installer));
+  });
+}
+
+function closeModal() { dom.modal.close(); }
+
+// ========== POBIERANIE ==========
+
+async function startDownload(gameId, installerId) {
+  try {
+    await invoke("start_download", { gameId, installerId });
+    await loadDownloads();
+    dom.dlBadge.textContent = "..."; show(dom.dlBadge);
+    switchView("downloads");
+  } catch (e) {
+    console.error("download:", e);
+    if (e.includes("auth")) { loggedIn = false; renderAuth(); }
+  }
+}
+
+async function pauseDl(id) {
+  try { await invoke("pause_download", { downloadId: id }); } catch (e) { console.error(e); }
+}
+
+async function cancelDl(id) {
+  try { await invoke("cancel_download", { downloadId: id }); await loadDownloads(); } catch (e) { console.error(e); }
+}
+
+// ========== LISTA POBRA\u0143 ==========
+
+async function loadDownloads() {
+  let rows;
+  try { rows = await invoke("get_downloads"); } catch (e) { rows = []; console.error(e); }
+  dom.dlList.innerHTML = "";
+  if (rows.length === 0) {
+    dom.dlList.innerHTML = "<p class=\"empty-state\">Brak pobiera\u0144.</p>";
+    hide(dom.dlBadge); return;
+  }
+  const active = rows.filter(d => d.status === "downloading").length;
+  dom.dlBadge.textContent = active > 0 ? String(active) : "\u2705";
+  show(dom.dlBadge);
+  for (const d of rows) {
+    const el = document.createElement("div");
+    el.className = "download-item"; el.dataset.dlId = d.id;
+    updateDlItem(el, d);
+    dom.dlList.appendChild(el);
+  }
+}
+
+function updateDlItem(el, d) {
+  const pct = d.progress != null ? d.progress : (d.totalBytes > 0 ? (d.downloadedBytes / d.totalBytes * 100) : 0);
+  const cls = d.status === "completed" ? "completed" : d.status === "failed" ? "failed" : d.status === "paused" ? "paused" : "";
+  el.innerHTML = `
+    <div class="dl-game-title">${esc(d.gameTitle)}</div>
+    <div class="dl-filename">${esc(d.filename)}</div>
+    <div class="dl-progress-track"><div class="dl-progress-fill ${cls}" style="width:${Math.min(pct,100)}%"></div></div>
+    <div class="dl-info">
+      <span class="dl-status">${d.status}</span>
+      <span>${fmtSize(d.downloadedBytes)} / ${fmtSize(d.totalBytes)}</span>
+      <span>${pct.toFixed(1)}%</span>
+    </div>
+    <div class="dl-actions">
+      ${d.status === "downloading" ? `<button class="btn btn-small" onclick="pauseDl(${d.id})">Pauza</button><button class="btn btn-small" onclick="cancelDl(${d.id})">Anuluj</button>` : ""}
+      ${d.status === "paused" ? `<button class="btn btn-small btn-primary" onclick="startDownload(${d.gameId},'${d.installerId}')">Wzn\u00f3w</button><button class="btn btn-small" onclick="cancelDl(${d.id})">Anuluj</button>` : ""}
+      ${d.status === "failed" ? `<button class="btn btn-small btn-primary" onclick="startDownload(${d.gameId},'${d.installerId}')">Spr\u00f3buj ponownie</button>` : ""}
+    </div>`;
+}
+
+// ========== POMOCNICZE ==========
+
+function esc(s) {
+  return !s ? "" : String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" })[c]);
+}
+
+function fmtSize(bytes) {
+  bytes = parseInt(bytes) || 0;
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + " KiB";
+  if (bytes < 1073741824) return (bytes/1048576).toFixed(1) + " MiB";
+  return (bytes/1073741824).toFixed(2) + " GiB";
+}
+
+window.pauseDl = pauseDl;
+window.cancelDl = cancelDl;
+window.startDownload = startDownload;
+window.closeModal = closeModal;
+
+document.addEventListener("DOMContentLoaded", init);
